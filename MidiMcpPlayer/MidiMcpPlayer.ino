@@ -36,7 +36,8 @@ bool startPending = false;
 bool midiRunning = false;
 
 size_t currentEventIndex = 0;
-uint16_t ticksRemaining = 0;
+uint32_t clockPosition = 0;
+uint32_t eventEndTick = 0;
 bool noteActive = false;
 uint8_t activeNote = 0;
 uint8_t activeVelocity = 0;
@@ -294,7 +295,8 @@ void beginPlayback() {
   }
 
   currentEventIndex = 0;
-  ticksRemaining = 0;
+  clockPosition = 0;
+  eventEndTick = 0;
   noteActive = false;
   playing = true;
   startPending = false;
@@ -309,7 +311,8 @@ void stopPlayback(bool keepPending) {
     noteActive = false;
   }
   playing = false;
-  ticksRemaining = 0;
+  clockPosition = 0;
+  eventEndTick = 0;
   currentEventIndex = 0;
   if (!keepPending) {
     startPending = false;
@@ -324,7 +327,7 @@ void startCurrentEvent() {
   }
 
   MusicEvent &event = sequence.events[currentEventIndex];
-  ticksRemaining = event.ticks;
+  eventEndTick = clockPosition + event.ticks;
   if (event.isNote) {
     uint8_t channel = sequence.channel == 0 ? DEFAULT_MIDI_CHANNEL : sequence.channel;
     MIDI.sendNoteOn(event.note, event.velocity, channel);
@@ -397,17 +400,18 @@ void handleMidiClock() {
     return;
   }
 
-  if (ticksRemaining > 0) {
-    ticksRemaining--;
-    if (ticksRemaining == 0) {
-      finishCurrentEvent();
-    }
+  clockPosition++;
+
+  while (playing && clockPosition >= eventEndTick) {
+    finishCurrentEvent();
   }
 }
 
 void handleMidiStart() {
   midiRunning = true;
   Serial.println(F("MIDI Start received."));
+  clockPosition = 0;
+  eventEndTick = 0;
   bool wasPlaying = playing;
   if (playing) {
     stopPlayback(true);
@@ -431,6 +435,8 @@ void handleMidiStop() {
 void handleMidiContinue() {
   midiRunning = true;
   Serial.println(F("MIDI Continue received."));
+  clockPosition = 0;
+  eventEndTick = 0;
   if (startPending && sequenceLoaded) {
     beginPlayback();
   }
