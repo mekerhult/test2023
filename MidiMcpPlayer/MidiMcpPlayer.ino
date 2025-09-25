@@ -92,6 +92,7 @@ void sendJsonError(WiFiClient &client, int statusCode, const String &code,
 void processClient(WiFiClient &client);
 void handleStatusRequest(WiFiClient &client);
 void handleSequencePost(WiFiClient &client, const String &body);
+void printWifiStatus();
 
 void beginPlayback();
 void stopPlayback(bool keepPending);
@@ -454,17 +455,15 @@ void setup() {
 
   Serial.println(F("Booting UNO R4 MIDI player"));
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print(F("Connecting to Wi-Fi"));
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print('.');
+  int status = WL_IDLE_STATUS;
+  while (status != WL_CONNECTED) {
+    Serial.print(F("Attempting to connect to Network named: "));
+    Serial.println(WIFI_SSID);
+    status = WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    delay(10000);
   }
-  Serial.println();
-  Serial.print(F("Connected. IP: "));
-  Serial.println(WiFi.localIP());
-
   server.begin();
+  printWifiStatus();
   Serial.println(F("Sequence control server listening on port 80"));
 
   Serial1.begin(31250);
@@ -485,4 +484,19 @@ void loop() {
   if (client) {
     processClient(client);
   }
+}
+
+void printWifiStatus() {
+  Serial.print(F("SSID: "));
+  Serial.println(WiFi.SSID());
+
+  IPAddress ip = WiFi.localIP();
+  Serial.print(F("IP Address: "));
+  Serial.println(ip);
+
+  long rssi = WiFi.RSSI();
+  Serial.print(F("signal strength (RSSI):"));
+  Serial.print(rssi);
+  Serial.println(F(" dBm"));
+  Serial.println(ip);
 }
