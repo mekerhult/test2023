@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "uno-r4-midi": {
+      "command": "python3",
+      "args": [
+        "/absolute/path/to/uno_r4_mcp_bridge.py",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "UNO_R4_BASE_URL": "http://192.168.1.42"
+      },
+      "description": "Arduino UNO R4 WiFi MIDI player (FastMCP bridge)"
+    }
+  }
+}
