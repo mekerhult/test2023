@@ -26,6 +26,10 @@ struct MusicSequence {
   MusicEvent events[MAX_EVENTS];
   size_t count;
   uint8_t channel;
+  uint16_t sourceTicksPerQuarter;
+  uint16_t appliedTicksPerQuarter;
+  bool ticksPerQuarterProvided;
+  bool autoScaledTicks;
 };
 
 MusicSequence sequence;
@@ -51,6 +55,15 @@ const uint8_t STATUS_OK = 200;
 const uint8_t STATUS_BAD_REQUEST = 400;
 const uint8_t STATUS_METHOD_NOT_ALLOWED = 405;
 const uint8_t STATUS_NOT_FOUND = 404;
+
+uint32_t gcd32(uint32_t a, uint32_t b) {
+  while (b != 0) {
+    uint32_t temp = a % b;
+    a = b;
+    b = temp;
+  }
+  return a;
+}
 
 String statusText(int code) {
   switch (code) {
@@ -192,6 +205,18 @@ void handleStatusRequest(WiFiClient &client) {
   doc["startPending"] = startPending;
   doc["midiClockRunning"] = midiRunning;
 
+  JsonObject timing = doc.createNestedObject("timing");
+  timing["sourceTicksPerQuarter"] = sequence.sourceTicksPerQuarter;
+  timing["appliedTicksPerQuarter"] = sequence.appliedTicksPerQuarter;
+  timing["ticksPerQuarterProvided"] = sequence.ticksPerQuarterProvided;
+  timing["autoScaled"] = sequence.autoScaledTicks;
+  if (sequence.appliedTicksPerQuarter > 0) {
+    timing["scaleFactor"] = static_cast<float>(sequence.sourceTicksPerQuarter) /
+                             static_cast<float>(sequence.appliedTicksPerQuarter);
+  } else {
+    timing["scaleFactor"] = 1.0f;
+  }
+
   JsonObject wifi = doc.createNestedObject("wifi");
   wifi["ip"] = WiFi.localIP().toString();
   wifi["rssi"] = WiFi.RSSI();
@@ -221,7 +246,25 @@ void handleSequencePost(WiFiClient &client, const String &body) {
     channel = DEFAULT_MIDI_CHANNEL;
   }
 
+  uint32_t requestedTicksPerQuarter = payload["ticksPerQuarter"].as<uint32_t>();
+  if (requestedTicksPerQuarter == 0) {
+    requestedTicksPerQuarter = payload["ppqn"].as<uint32_t>();
+  }
+  bool ticksPerQuarterProvided = requestedTicksPerQuarter > 0;
+  if (requestedTicksPerQuarter == 0) {
+    requestedTicksPerQuarter = 24;
+  }
+  if (ticksPerQuarterProvided && requestedTicksPerQuarter > 65535) {
+    sendJsonError(client, STATUS_BAD_REQUEST, "ticks_per_quarter_out_of_range",
+                  "ticksPerQuarter must be 65535 or less.");
+    return;
+  }
+
+  MusicEvent tempEvents[MAX_EVENTS];
+  uint32_t rawTicks[MAX_EVENTS];
+
   size_t count = 0;
+  uint32_t gcdTicks = 0;
   for (JsonObject obj : seqArray) {
     if (count >= MAX_EVENTS) {
       sendJsonError(client, STATUS_BAD_REQUEST, "sequence_too_long",
@@ -230,15 +273,22 @@ void handleSequencePost(WiFiClient &client, const String &body) {
     }
 
     const char *type = obj["type"] | "";
-    uint16_t ticks = obj["ticks"].as<uint16_t>();
+    uint32_t ticks = obj["ticks"].as<uint32_t>();
     if (ticks == 0) {
       sendJsonError(client, STATUS_BAD_REQUEST, "ticks_must_be_positive",
                     "Each event must specify 'ticks' greater than zero.");
       return;
     }
 
-    MusicEvent &event = sequence.events[count];
-    event.ticks = ticks;
+    rawTicks[count] = ticks;
+    if (gcdTicks == 0) {
+      gcdTicks = ticks;
+    } else {
+      gcdTicks = gcd32(gcdTicks, ticks);
+    }
+
+    MusicEvent &event = tempEvents[count];
+    event.ticks = 0;
 
     if (strcmp(type, "note") == 0) {
       int note = obj["note"].as<int>();
@@ -266,8 +316,91 @@ void handleSequencePost(WiFiClient &client, const String &body) {
     count++;
   }
 
+  uint32_t scaleFactor = 1;
+  uint16_t appliedTicksPerQuarter = 24;
+  uint16_t sourceTicksPerQuarter =
+      requestedTicksPerQuarter > 65535
+          ? static_cast<uint16_t>(65535)
+          : static_cast<uint16_t>(requestedTicksPerQuarter);
+  sequence.autoScaledTicks = false;
+
+  if (ticksPerQuarterProvided) {
+    for (size_t i = 0; i < count; ++i) {
+      uint32_t ticks = rawTicks[i];
+      uint32_t scaled = static_cast<uint32_t>(
+          (static_cast<uint64_t>(ticks) * appliedTicksPerQuarter +
+           (requestedTicksPerQuarter / 2)) /
+          requestedTicksPerQuarter);
+      if (scaled == 0) {
+        scaled = 1;
+      }
+      if (scaled > 65535) {
+        sendJsonError(
+            client, STATUS_BAD_REQUEST, "ticks_after_scaling_out_of_range",
+            "Event duration exceeds supported range after scaling.");
+        return;
+      }
+      tempEvents[i].ticks = static_cast<uint16_t>(scaled);
+    }
+    sequence.autoScaledTicks = false;
+  } else {
+    if (gcdTicks >= appliedTicksPerQuarter &&
+        gcdTicks % appliedTicksPerQuarter == 0) {
+      scaleFactor = gcdTicks / appliedTicksPerQuarter;
+    }
+
+    if (scaleFactor > 1) {
+      for (size_t i = 0; i < count; ++i) {
+        uint32_t scaled = rawTicks[i] / scaleFactor;
+        if (scaled == 0) {
+          scaled = 1;
+        }
+        if (scaled > 65535) {
+          sendJsonError(client, STATUS_BAD_REQUEST, "ticks_too_large",
+                        "Scaled event duration exceeds supported range.");
+          return;
+        }
+        tempEvents[i].ticks = static_cast<uint16_t>(scaled);
+      }
+      sequence.autoScaledTicks = true;
+      uint32_t computedSource = scaleFactor * appliedTicksPerQuarter;
+      if (computedSource > 65535) {
+        computedSource = 65535;
+      }
+      sourceTicksPerQuarter = static_cast<uint16_t>(computedSource);
+    } else {
+      for (size_t i = 0; i < count; ++i) {
+        if (rawTicks[i] > 65535) {
+          sendJsonError(client, STATUS_BAD_REQUEST, "ticks_too_large",
+                        "Event duration exceeds supported range.");
+          return;
+        }
+        tempEvents[i].ticks = static_cast<uint16_t>(rawTicks[i]);
+      }
+      sequence.autoScaledTicks = false;
+      sourceTicksPerQuarter = appliedTicksPerQuarter;
+    }
+  }
+
+  if (sequence.autoScaledTicks) {
+    Serial.print(F("Auto-scaled sequence ticks by factor "));
+    Serial.println(scaleFactor);
+  }
+  if (ticksPerQuarterProvided && requestedTicksPerQuarter != appliedTicksPerQuarter) {
+    Serial.print(F("Scaled sequence from "));
+    Serial.print(requestedTicksPerQuarter);
+    Serial.println(F(" ticks per quarter to 24."));
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    sequence.events[i] = tempEvents[i];
+  }
+
   sequence.count = count;
   sequence.channel = channel;
+  sequence.sourceTicksPerQuarter = sourceTicksPerQuarter;
+  sequence.appliedTicksPerQuarter = appliedTicksPerQuarter;
+  sequence.ticksPerQuarterProvided = ticksPerQuarterProvided;
   sequenceLoaded = count > 0;
   startPending = false;
   if (playing) {
@@ -285,6 +418,8 @@ void handleSequencePost(WiFiClient &client, const String &body) {
   response["channel"] = channel;
   response["sequenceLoaded"] = sequenceLoaded;
   response["midiClockRunning"] = midiRunning;
+  response["ticksPerQuarter"] = sequence.sourceTicksPerQuarter;
+  response["autoScaled"] = sequence.autoScaledTicks;
 
   sendJsonResponse(client, STATUS_OK, response);
 }
@@ -446,6 +581,10 @@ void handleMidiContinue() {
 void setup() {
   sequence.count = 0;
   sequence.channel = DEFAULT_MIDI_CHANNEL;
+  sequence.sourceTicksPerQuarter = 24;
+  sequence.appliedTicksPerQuarter = 24;
+  sequence.ticksPerQuarterProvided = false;
+  sequence.autoScaledTicks = false;
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 

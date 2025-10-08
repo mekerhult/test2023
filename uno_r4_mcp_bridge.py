@@ -72,6 +72,15 @@ class LoadSequenceRequest(BaseModel):
         max_length=MAX_EVENTS,
         description="Ordered list of note/rest events to buffer on the UNO.",
     )
+    ticks_per_quarter: PositiveInt | None = Field(
+        default=None,
+        description=(
+            "Optional source ticks-per-quarter (PPQN) resolution. When provided "
+            "the Arduino rescales durations to the 24 PPQN MIDI clock."
+        ),
+        ge=1,
+        le=4096,
+    )
 
 
 class ArduinoBridge:
@@ -154,6 +163,18 @@ ChannelArg = Annotated[
         examples=[1],
     ),
 ]
+TicksPerQuarterArg = Annotated[
+    int | None,
+    Field(
+        default=None,
+        ge=1,
+        le=4096,
+        description=(
+            "Optional source PPQN resolution. Common values are 24, 48, 96, 192,"
+            " or 480. When omitted the bridge lets the Arduino auto-detect."
+        ),
+    ),
+]
 
 
 @server.tool(
@@ -162,10 +183,13 @@ ChannelArg = Annotated[
 def load_sequence(
     sequence: SequenceArg,
     channel: ChannelArg = DEFAULT_CHANNEL,
+    ticks_per_quarter: TicksPerQuarterArg = None,
     ctx: Context | None = None,
 ) -> dict:
     try:
-        request = LoadSequenceRequest(channel=channel, sequence=sequence)
+        request = LoadSequenceRequest(
+            channel=channel, sequence=sequence, ticks_per_quarter=ticks_per_quarter
+        )
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
 

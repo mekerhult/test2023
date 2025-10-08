@@ -45,6 +45,7 @@ is handled with a push button on D4 that toggles between play and stop.
   ```json
   {
     "channel": 1,
+    "ticksPerQuarter": 48,
     "sequence": [
       { "type": "note", "note": 60, "velocity": 96, "ticks": 24 },
       { "type": "rest", "ticks": 12 },
@@ -54,6 +55,8 @@ is handled with a push button on D4 that toggles between play and stop.
   ```
   Loads up to 64 events. Each event requires a positive `ticks` duration. Note
   events must include `note` (0–127) and optionally `velocity` (defaults to 100).
+  Use the optional `ticksPerQuarter` (alias `ppqn`) to tell the sketch what
+  resolution the payload uses; it is scaled to 24 ticks per quarter internally.
   The board immediately replaces the previous buffer and arms playback.
 
 - `GET /status`
@@ -65,6 +68,13 @@ is handled with a push button on D4 that toggles between play and stop.
     "playing": false,
     "startPending": true,
     "midiClockRunning": false,
+    "timing": {
+      "sourceTicksPerQuarter": 48,
+      "appliedTicksPerQuarter": 24,
+      "ticksPerQuarterProvided": true,
+      "autoScaled": false,
+      "scaleFactor": 2.0
+    },
     "wifi": {
       "ip": "192.168.1.42",
       "rssi": -54
@@ -72,6 +82,8 @@ is handled with a push button on D4 that toggles between play and stop.
   }
   ```
   Useful for debugging connectivity from the Python side.
+  The `timing` block reflects whether the sketch auto-scaled the incoming data
+  and which ticks-per-quarter resolution it ultimately stored.
 
 ## Python MCP bridge
 
@@ -100,9 +112,10 @@ python uno_r4_mcp_bridge.py
 
 Two MCP tools become available:
 
-- `load_sequence(sequence, channel=1)` – validates the payload and forwards it
-  to `POST /sequence` on the Arduino. On success the Arduino confirms how many
-  events were buffered and whether the MIDI clock is currently running.
+- `load_sequence(sequence, channel=1, ticks_per_quarter=None)` – validates the
+  payload and forwards it to `POST /sequence` on the Arduino. On success the
+  Arduino confirms how many events were buffered, the ticks-per-quarter it is
+  using internally, and whether the MIDI clock is currently running.
 - `get_status()` – simply returns the JSON document from `GET /status`.
 
 Both tools surface Arduino-side validation errors (e.g. bad note numbers) back
@@ -111,7 +124,12 @@ through MCP so the calling agent can correct its request.
 ## Music data format
 
 - **ticks** – durations are specified in MIDI clock ticks (24 ticks per quarter
-  note when the external device conforms to the MIDI spec).
+  note when the external device conforms to the MIDI spec). If your data is in a
+  different resolution (e.g. 48 ticks per quarter from a DAW export) provide the
+  optional `ticksPerQuarter` (or `ppqn`) value and the Arduino will scale the
+  durations accordingly. When omitted the sketch automatically reduces common
+  multiples (48, 96, …) down to 24 ticks per quarter so playback matches the
+  external MIDI clock.
 - **note events** – require `type: "note"`, `note` 0–127, optional `velocity`
   1–127 (defaults to 100).
 - **rests** – `type: "rest"` and `ticks`; any `note` or `velocity` fields are
