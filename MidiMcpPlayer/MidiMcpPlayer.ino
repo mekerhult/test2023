@@ -8,6 +8,9 @@ const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 const uint16_t CONTROL_PORT = 80;
 const uint8_t BUTTON_PIN = 4;       // D4 on Arduino UNO R4 WiFi
+const uint8_t TRIGGER_BUTTON_PIN = 3;  // D3 on Arduino UNO R4 WiFi
+const uint8_t TRIGGER_NOTE = 60;    // Middle C
+const uint8_t TRIGGER_VELOCITY = 100;
 const uint8_t DEFAULT_MIDI_CHANNEL = 1;
 const size_t MAX_EVENTS = 64;
 
@@ -49,6 +52,11 @@ uint8_t activeVelocity = 0;
 bool buttonState = HIGH;
 bool lastButtonReading = HIGH;
 unsigned long lastDebounceTime = 0;
+
+bool triggerButtonState = HIGH;
+bool lastTriggerButtonReading = HIGH;
+unsigned long lastTriggerDebounceTime = 0;
+
 const unsigned long debounceDelay = 30;
 
 const uint8_t STATUS_OK = 200;
@@ -113,6 +121,7 @@ void startCurrentEvent();
 void finishCurrentEvent();
 void allNotesOff();
 void handleButton();
+void handleTriggerButton();
 
 void handleMidiClock();
 void handleMidiStart();
@@ -523,6 +532,28 @@ void handleButton() {
   lastButtonReading = reading;
 }
 
+void handleTriggerButton() {
+  bool reading = digitalRead(TRIGGER_BUTTON_PIN);
+  if (reading != lastTriggerButtonReading) {
+    lastTriggerDebounceTime = millis();
+  }
+
+  if ((millis() - lastTriggerDebounceTime) > debounceDelay) {
+    if (reading != triggerButtonState) {
+      triggerButtonState = reading;
+      uint8_t channel =
+          sequence.channel == 0 ? DEFAULT_MIDI_CHANNEL : sequence.channel;
+      if (triggerButtonState == LOW) {
+        MIDI.sendNoteOn(TRIGGER_NOTE, TRIGGER_VELOCITY, channel);
+      } else {
+        MIDI.sendNoteOff(TRIGGER_NOTE, 0, channel);
+      }
+    }
+  }
+
+  lastTriggerButtonReading = reading;
+}
+
 void handleMidiClock() {
   if (!midiRunning) {
     return;
@@ -587,6 +618,7 @@ void setup() {
   sequence.autoScaledTicks = false;
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(TRIGGER_BUTTON_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
   while (!Serial) {
@@ -617,6 +649,7 @@ void setup() {
 
 void loop() {
   handleButton();
+  handleTriggerButton();
   MIDI.read();
 
   WiFiClient client = server.available();

@@ -14,7 +14,9 @@ LLM / Claude ──(MCP over stdio)──▶ `uno_r4_mcp_bridge.py`
 
 The Arduino receives monophonic MIDI phrases, waits for an external MIDI clock
 (start/continue/stop), and performs the uploaded material in sync. Transport
-is handled with a push button on D4 that toggles between play and stop.
+is handled with a push button on D4 that toggles between play and stop, while a
+second button on D3 can be tapped to fire a middle C over MIDI for quick
+testing.
 
 ## Components
 
@@ -33,8 +35,9 @@ is handled with a push button on D4 that toggles between play and stop.
    Arduino IDE.
 2. Open `MidiMcpPlayer/MidiMcpPlayer.ino` and set `WIFI_SSID` / `WIFI_PASSWORD`
    near the top of the file.
-3. Wire the MIDI shield to the hardware UART and a normally-open push button
-   from D4 to ground (the sketch enables the pull-up resistor).
+3. Wire the MIDI shield to the hardware UART, a normally-open push button from
+   D4 to ground (transport control), and another normally-open push button from
+   D3 to ground (manual C trigger). The sketch enables the pull-up resistors.
 4. Select **Arduino UNO R4 WiFi** as the target board and upload the sketch.
 5. Open the serial monitor at 115200 baud to confirm the assigned IP address and
    REST server status.
@@ -173,7 +176,8 @@ configuration, restart Claude Desktop. The MCP panel should list
    calling `get_status` (either from Claude or via `mcp` CLI tooling).
 3. Have the AI agent invoke `load_sequence` with the desired phrase.
 4. Press the D4 button to arm playback. Once external MIDI clock pulses arrive,
-   the UNO will perform the uploaded notes in sync. Press D4 again to stop.
+   the UNO will perform the uploaded notes in sync. Press D4 again to stop. Tap
+   the D3 button at any time to send a momentary middle C for monitoring.
 5. Send a new `load_sequence` request whenever you want to change the material.
 
 ## Troubleshooting
