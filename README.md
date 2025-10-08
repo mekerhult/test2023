@@ -14,9 +14,9 @@ LLM / Claude ──(MCP over stdio)──▶ `uno_r4_mcp_bridge.py`
 
 The Arduino receives monophonic MIDI phrases, waits for an external MIDI clock
 (start/continue/stop), and performs the uploaded material in sync. Transport
-is handled with a push button on D4 that toggles between play and stop, while a
-second button on D3 can be tapped to fire a middle C over MIDI for quick
-testing.
+is handled with a push button on D4 that toggles between play and stop and the
+sequence loops continuously until you press D4 again. A second button on D3 can
+be tapped to fire a middle C over MIDI for quick testing.
 
 ## Components
 
@@ -60,7 +60,9 @@ testing.
   events must include `note` (0–127) and optionally `velocity` (defaults to 100).
   Use the optional `ticksPerQuarter` (alias `ppqn`) to tell the sketch what
   resolution the payload uses; it is scaled to 24 ticks per quarter internally.
-  The board immediately replaces the previous buffer and arms playback.
+  The board immediately replaces the previous buffer and arms playback. Once
+  started, the buffer loops indefinitely until you stop transport with the D4
+  button or an external MIDI Stop.
 
 - `GET /status`
   ```json
@@ -176,8 +178,9 @@ configuration, restart Claude Desktop. The MCP panel should list
    calling `get_status` (either from Claude or via `mcp` CLI tooling).
 3. Have the AI agent invoke `load_sequence` with the desired phrase.
 4. Press the D4 button to arm playback. Once external MIDI clock pulses arrive,
-   the UNO will perform the uploaded notes in sync. Press D4 again to stop. Tap
-   the D3 button at any time to send a momentary middle C for monitoring.
+   the UNO will perform the uploaded notes in sync and keep looping the buffered
+   sequence. Press D4 again to stop. Tap the D3 button at any time to send a
+   momentary middle C for monitoring.
 5. Send a new `load_sequence` request whenever you want to change the material.
 
 ## Troubleshooting

@@ -490,11 +490,24 @@ void finishCurrentEvent() {
     MIDI.sendNoteOff(activeNote, 0, channel);
     noteActive = false;
   }
+  if (!playing) {
+    return;
+  }
+
   currentEventIndex++;
   if (currentEventIndex >= sequence.count) {
-    stopPlayback(false);
-  } else {
+    currentEventIndex = 0;
+    if (sequence.count == 0) {
+      stopPlayback(false);
+      return;
+    }
+    Serial.println(F("Looping sequence."));
+  }
+
+  if (sequence.count > 0) {
     startCurrentEvent();
+  } else {
+    stopPlayback(false);
   }
 }
 
